@@ -15,30 +15,42 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Camada de servico: concentra as regras de negocio de destinos e avaliacoes.
  * Os controllers apenas traduzem HTTP para chamadas desta classe.
+ *
+ * O que mudou com a persistencia em banco:
+ *
+ * - Cada operacao publica passou a ser uma transacao. As leituras sao
+ *   readOnly, o que permite ao Hibernate pular a checagem de alteracoes; as
+ *   escritas abrem transacao de verdade, entao um erro no meio do caminho
+ *   desfaz tudo (por exemplo, uma avaliacao gravada mas com a media do destino
+ *   nao atualizada deixou de ser um estado possivel).
+ *
+ * - A trava em memoria que serializava o recalculo da media saiu. Ela so
+ *   funcionava dentro de um processo; com banco, o controle correto e o lock
+ *   de linha do proprio PostgreSQL, obtido em buscarParaAtualizacao.
+ *
+ * - Como as entidades ficam gerenciadas dentro da transacao, as chamadas a
+ *   salvar() nas operacoes de atualizacao sao redundantes do ponto de vista do
+ *   JPA (o flush persiste as alteracoes de qualquer forma). Elas foram
+ *   mantidas porque a camada de servico conversa com a porta, nao com o JPA:
+ *   remove-las tornaria o codigo dependente do comportamento de um mecanismo
+ *   de persistencia especifico e quebraria a implementacao em memoria.
  */
 @Service
+@Transactional(readOnly = true)
 public class DestinoService {
 
     private static final Logger log = LoggerFactory.getLogger(DestinoService.class);
 
     private final DestinoRepository destinoRepository;
     private final AvaliacaoRepository avaliacaoRepository;
-
-    /**
-     * Uma trava por destino: garante que duas avaliacoes simultaneas do mesmo
-     * destino nao recalculem a media em cima de um estado intermediario.
-     * Em um cenario com banco de dados, isso seria uma transacao.
-     */
-    private final ConcurrentMap<UUID, Object> travas = new ConcurrentHashMap<>();
 
     public DestinoService(DestinoRepository destinoRepository, AvaliacaoRepository avaliacaoRepository) {
         this.destinoRepository = destinoRepository;
@@ -57,6 +69,7 @@ public class DestinoService {
     }
 
     /** Cadastra um novo destino. */
+    @Transactional
     public Destino criar(DestinoRequest request) {
         Localizacao localizacao = paraLocalizacao(request.localizacao());
         validarDuplicidade(request.nome(), localizacao, null);
@@ -75,6 +88,7 @@ public class DestinoService {
     }
 
     /** Substitui todos os dados cadastrais de um destino (PUT). */
+    @Transactional
     public Destino substituir(UUID id, DestinoRequest request) {
         Destino destino = buscarPorId(id);
         Localizacao localizacao = paraLocalizacao(request.localizacao());
@@ -94,6 +108,7 @@ public class DestinoService {
     }
 
     /** Atualiza apenas os campos informados (PATCH). */
+    @Transactional
     public Destino atualizarParcialmente(UUID id, DestinoPatchRequest request) {
         if (request == null || request.vazio()) {
             throw new RequisicaoInvalidaException("Informe ao menos um campo para atualizacao parcial");
@@ -123,34 +138,39 @@ public class DestinoService {
     }
 
     /** Exclui o destino e as avaliacoes associadas. */
+    @Transactional
     public void excluir(UUID id) {
         Destino destino = buscarPorId(id);
         avaliacaoRepository.removerPorDestino(destino.getId());
         destinoRepository.remover(destino.getId());
-        travas.remove(destino.getId());
         log.info("Destino excluido: id={}", id);
     }
 
     /**
      * Registra uma avaliacao e recalcula a nota media do destino a partir de
      * todas as avaliacoes existentes.
+     *
+     * O destino e lido com lock de escrita antes de qualquer alteracao: duas
+     * requisicoes simultaneas para o mesmo destino sao serializadas pelo
+     * banco, entao a segunda so recalcula a media depois que a primeira
+     * terminou de gravar. Sem isso, as duas leriam o mesmo conjunto de
+     * avaliacoes e uma sobrescreveria o resultado da outra.
      */
+    @Transactional
     public ResultadoAvaliacao registrarAvaliacao(UUID destinoId, AvaliacaoRequest request) {
-        Destino destino = buscarPorId(destinoId);
-        Object trava = travas.computeIfAbsent(destino.getId(), chave -> new Object());
+        Destino destino = destinoRepository.buscarParaAtualizacao(destinoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Destino nao encontrado: " + destinoId));
 
-        synchronized (trava) {
-            Avaliacao avaliacao = avaliacaoRepository.salvar(Avaliacao.nova(
-                    destino.getId(),
-                    request.autor().trim(),
-                    request.nota(),
-                    request.comentario() == null ? null : request.comentario().trim()));
+        Avaliacao avaliacao = avaliacaoRepository.salvar(Avaliacao.nova(
+                destino.getId(),
+                request.autor().trim(),
+                request.nota(),
+                request.comentario() == null ? null : request.comentario().trim()));
 
-            recalcularResumo(destino);
-            destinoRepository.salvar(destino);
-            log.info("Avaliacao registrada: destinoId={} novaMedia={}", destinoId, destino.getNotaMedia());
-            return new ResultadoAvaliacao(avaliacao, destino);
-        }
+        recalcularResumo(destino);
+        destinoRepository.salvar(destino);
+        log.info("Avaliacao registrada: destinoId={} novaMedia={}", destinoId, destino.getNotaMedia());
+        return new ResultadoAvaliacao(avaliacao, destino);
     }
 
     /** Lista as avaliacoes de um destino (o destino precisa existir). */
@@ -166,6 +186,11 @@ public class DestinoService {
                 .filter(avaliacao -> avaliacao.destinoId().equals(destino.getId()))
                 .orElseThrow(() -> new RecursoNaoEncontradoException(
                         "Avaliacao nao encontrada para o destino informado: " + avaliacaoId));
+    }
+
+    /** Verdadeiro quando ainda nao ha nenhum destino cadastrado. */
+    public boolean semDestinosCadastrados() {
+        return destinoRepository.vazio();
     }
 
     private void recalcularResumo(Destino destino) {
