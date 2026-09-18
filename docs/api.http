@@ -1,0 +1,119 @@
+### Coleção de requisições da API de Destinos
+### Uso: IntelliJ IDEA (HTTP Client) ou VS Code (extensão REST Client)
+
+@host = http://localhost:8080
+@base = {{host}}/api/v1/destinos
+
+### 1. Listar todos os destinos
+GET {{base}}
+Accept: application/json
+
+### 2. Pesquisar por nome (parcial, sem diferenciar acentos/maiúsculas)
+GET {{base}}?nome=gramado
+Accept: application/json
+
+### 3. Pesquisar por localização
+GET {{base}}?localizacao=argentina
+Accept: application/json
+
+### 4. Pesquisar combinando os dois filtros
+GET {{base}}?nome=bariloche&localizacao=argentina
+Accept: application/json
+
+### 5. Cadastrar um destino
+# @name cadastrar
+POST {{base}}
+Content-Type: application/json
+
+{
+  "nome": "Jericoacoara",
+  "descricao": "Vila de pescadores com dunas, lagoas e pôr do sol na Duna do Pôr do Sol.",
+  "localizacao": { "cidade": "Jijoca de Jericoacoara", "estado": "CE", "pais": "Brasil" },
+  "atividades": ["Kitesurf", "Passeio de buggy", "Lagoa do Paraíso"],
+  "hoteisDisponiveis": 60,
+  "precoPacote": 3200.00
+}
+
+### Guarda o id do destino recém-criado
+@destinoId = {{cadastrar.response.body.id}}
+
+### 6. Detalhar o destino criado
+GET {{base}}/{{destinoId}}
+Accept: application/json
+
+### 7. Atualizar por completo (PUT)
+PUT {{base}}/{{destinoId}}
+Content-Type: application/json
+
+{
+  "nome": "Jericoacoara",
+  "descricao": "Vila de pescadores no litoral oeste do Ceará, com dunas e lagoas de água doce.",
+  "localizacao": { "cidade": "Jijoca de Jericoacoara", "estado": "CE", "pais": "Brasil" },
+  "atividades": ["Kitesurf", "Passeio de buggy", "Pedra Furada"],
+  "hoteisDisponiveis": 75,
+  "precoPacote": 3450.00
+}
+
+### 8. Atualizar parcialmente (PATCH)
+PATCH {{base}}/{{destinoId}}
+Content-Type: application/json
+
+{
+  "hoteisDisponiveis": 80
+}
+
+### 9. Registrar avaliação (recalcula a média)
+POST {{base}}/{{destinoId}}/avaliacoes
+Content-Type: application/json
+
+{
+  "autor": "Ana",
+  "nota": 5,
+  "comentario": "Inesquecível, voltarei em julho."
+}
+
+### 10. Registrar outra avaliação
+POST {{base}}/{{destinoId}}/avaliacoes
+Content-Type: application/json
+
+{
+  "autor": "Bruno",
+  "nota": 4,
+  "comentario": "Ótimo passeio, acesso um pouco difícil."
+}
+
+### 11. Listar avaliações do destino
+GET {{base}}/{{destinoId}}/avaliacoes
+Accept: application/json
+
+### 12. Excluir o destino (remove também as avaliações)
+DELETE {{base}}/{{destinoId}}
+
+### --- Cenários de erro ---
+
+### 13. 400 — payload inválido
+POST {{base}}
+Content-Type: application/json
+
+{
+  "nome": "",
+  "hoteisDisponiveis": -1,
+  "precoPacote": -50
+}
+
+### 14. 400 — nota fora do intervalo permitido (1 a 5)
+POST {{base}}/{{destinoId}}/avaliacoes
+Content-Type: application/json
+
+{
+  "autor": "Carla",
+  "nota": 9
+}
+
+### 15. 404 — destino inexistente
+GET {{base}}/00000000-0000-0000-0000-000000000000
+Accept: application/json
+
+### 16. 400 — identificador em formato inválido
+GET {{base}}/abc
+Accept: application/json
