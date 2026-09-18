@@ -4,11 +4,16 @@ target/
 !**/src/test/**/target/
 .kotlin
 
+### Credenciais e configuracao local ###
+# .env guarda a senha real do banco e dos usuarios. Nunca versionar.
+# O modelo sem segredo fica em .env.example, que e versionado de proposito.
+.env
+.env.local
+*.env
+!.env.example
+
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+.idea/
 *.iws
 *.iml
 *.ipr
@@ -37,4 +42,3 @@ build/
 
 ### Mac OS ###
 .DS_Store
-.idea/

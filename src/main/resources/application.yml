@@ -1,15 +1,78 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
     name: destinos-api
 
-# Carga de dados de exemplo em memoria na inicializacao.
-# Defina como false para subir a aplicacao com a base vazia.
+  # ---------------------------------------------------------------------------
+  # Conexao com o banco.
+  #
+  # Nenhuma credencial fica versionada. Os valores vem do ambiente; os padroes
+  # correspondem ao container do docker-compose.yml, para que "docker compose up"
+  # seguido de "./mvnw spring-boot:run" funcione sem configurar nada.
+  #
+  # Para apontar ao Neon, exporte DB_URL, DB_USERNAME e DB_PASSWORD (ver .env.example
+  # e a secao de configuracao no README). O Neon exige TLS: a URL precisa terminar
+  # com ?sslmode=require.
+  # ---------------------------------------------------------------------------
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/destinos}
+    username: ${DB_USERNAME:destinos}
+    password: ${DB_PASSWORD:destinos}
+    hikari:
+      # O free tier do Neon limita conexoes simultaneas, e o banco hiberna
+      # quando ocioso: pool pequeno e timeout folgado evitam falha no primeiro
+      # acesso depois de um periodo parado.
+      maximum-pool-size: ${DB_POOL_MAX:5}
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      # O schema pertence ao Flyway. "validate" faz o Hibernate apenas conferir,
+      # na subida, se o mapeamento das entidades bate com as tabelas existentes.
+      # Assim um erro de mapeamento aparece como falha de inicializacao, com a
+      # coluna divergente no log, em vez de virar um erro de SQL em producao.
+      # Nunca use update ou create-drop aqui: alterariam o banco sem registro.
+      ddl-auto: validate
+    # Desligado de proposito. Com open-in-view a sessao do JPA fica aberta ate
+    # a resposta ser escrita, o que esconde consultas preguicosas disparadas
+    # pela camada web e mantem conexao presa por mais tempo do que o necessario.
+    # Tudo o que a resposta precisa e carregado dentro da transacao do servico.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # O banco do Neon ja vem criado e nao vazio (schema public existente):
+    # baseline-on-migrate evita que a primeira migration seja recusada.
+    baseline-on-migrate: true
+
+# ---------------------------------------------------------------------------
+# Carga inicial.
+#
+# app.dados-iniciais controla apenas os destinos de exemplo; os usuarios de
+# acesso sao sempre criados se ainda nao existirem, senao a API subiria sem
+# ninguem capaz de administra-la.
+#
+# As senhas tem um padrao obvio que serve so para desenvolvimento, e a
+# aplicacao registra um aviso no log enquanto ele estiver em uso.
+# ---------------------------------------------------------------------------
 app:
   dados-iniciais: true
+  usuarios-iniciais:
+    admin-username: ${APP_ADMIN_USERNAME:admin}
+    admin-senha: ${APP_ADMIN_SENHA:trocar-esta-senha}
+    user-username: ${APP_USER_USERNAME:viajante}
+    user-senha: ${APP_USER_SENHA:trocar-esta-senha}
 
 logging:
   level:
     br.com.agenciaviagens: INFO
+    # Descomente para inspecionar o SQL gerado durante o desenvolvimento.
+    # org.hibernate.SQL: DEBUG
+    # org.hibernate.orm.jdbc.bind: TRACE

@@ -13,13 +13,21 @@
 
     <groupId>br.com.agenciaviagens</groupId>
     <artifactId>destinos-api</artifactId>
-    <version>1.0.0</version>
+    <version>2.0.0</version>
     <name>destinos-api</name>
-    <description>API REST para gerenciamento de destinos turisticos</description>
+    <description>API REST para gerenciamento de destinos turisticos, com persistencia em PostgreSQL e controle de acesso por perfil</description>
 
     <properties>
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!--
+            BouncyCastle nao faz parte das dependencias gerenciadas pelo BOM do
+            Spring Boot, entao a versao precisa ser declarada aqui. Ele entra no
+            projeto porque o Argon2PasswordEncoder do Spring Security depende
+            dele para calcular o hash.
+        -->
+        <bouncycastle.version>1.84</bouncycastle.version>
+        <testcontainers.version>1.21.0</testcontainers.version>
     </properties>
 
     <dependencies>
@@ -35,10 +43,80 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- Testes: JUnit 5, AssertJ, MockMvc (traz spring-boot-starter-test transitivamente) -->
+        <!-- Persistencia: Spring Data JPA + Hibernate -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Autenticacao e autorizacao -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!--
+            Argon2id. O Spring Security expoe o Argon2PasswordEncoder, mas a
+            implementacao do algoritmo vem do BouncyCastle: sem esta dependencia
+            a aplicacao sobe e so quebra na primeira tentativa de codificar uma
+            senha, com NoClassDefFoundError.
+        -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
+
+        <!-- Versionamento do schema. O banco nao e criado pelo Hibernate. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Driver JDBC do PostgreSQL, necessario apenas em execucao -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Testes: JUnit 5, AssertJ, MockMvc -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Utilitarios de teste do Spring Security (@WithMockUser, httpBasic()) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Testcontainers: o teste de integracao sobe um PostgreSQL real em
+            container. Banco em memoria nao serviria aqui, porque as migrations
+            usam tipos e sintaxe especificos do PostgreSQL - testar contra um
+            dialeto diferente do de producao validaria a coisa errada.
+
+            A ligacao com o Spring e feita via @DynamicPropertySource, API do
+            proprio Spring Framework, em vez de @ServiceConnection: uma
+            dependencia a menos e nenhum acoplamento ao pacote de integracao do
+            Boot, que mudou de nome entre versoes.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -48,6 +126,34 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                Correcao de um problema silencioso da versao anterior: o
+                DestinoControllerIT existia mas nunca era executado. O surefire
+                so reconhece classes com nome Test*, *Test, *Tests ou *TestCase,
+                e o sufixo IT nao casa com nenhum desses padroes - o teste
+                passava despercebido porque "nao falhar" e indistinguivel de
+                "nao rodar" no relatorio.
+
+                O failsafe e o plugin certo para testes de integracao: roda na
+                fase verify, depois do pacote montado, e reconhece o sufixo IT.
+                Separacao pratica que isso cria:
+
+                  ./mvnw test     testes de unidade, segundos, sem Docker
+                  ./mvnw verify   tudo, incluindo o IT com PostgreSQL real
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

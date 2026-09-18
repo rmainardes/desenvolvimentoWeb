@@ -1,0 +1,36 @@
+# PostgreSQL local para desenvolvimento.
+#
+#   docker compose up -d      sobe o banco
+#   docker compose down       para o banco, preservando os dados
+#   docker compose down -v    para o banco e apaga o volume (recomeca do zero)
+#
+# As credenciais aqui sao as mesmas que o application.yml assume por padrao,
+# entao depois de subir este container a aplicacao roda sem nenhuma variavel de
+# ambiente configurada. Sao credenciais de desenvolvimento e nao valem nada
+# fora da sua maquina -- o banco nao esta exposto para fora de localhost.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: destinos-postgres
+    environment:
+      POSTGRES_DB: destinos
+      POSTGRES_USER: destinos
+      POSTGRES_PASSWORD: destinos
+      # Faz o initdb usar collation deterministica, igual em qualquer host.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # Publicado apenas em localhost: nao aceita conexao de outra maquina.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-dados:/var/lib/postgresql/data
+    healthcheck:
+      # A aplicacao pode subir junto: espera o banco aceitar conexao de fato,
+      # e nao apenas o container existir.
+      test: ["CMD-SHELL", "pg_isready -U destinos -d destinos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-dados:
