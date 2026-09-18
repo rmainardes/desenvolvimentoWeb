@@ -1,28 +1,50 @@
 ### Coleção de requisições da API de Destinos
 ### Uso: IntelliJ IDEA (HTTP Client) ou VS Code (extensão REST Client)
+###
+### AUTENTICAÇÃO
+### A API usa HTTP Basic. A sintaxe abaixo é a do IntelliJ, que codifica em
+### base64 sozinho. No VS Code (REST Client), troque o espaço por dois-pontos:
+###     Authorization: Basic {{usuario}}:{{senha}}
+###
+### Ajuste as senhas para as que você definiu em APP_ADMIN_SENHA / APP_USER_SENHA.
 
 @host = http://localhost:8080
 @base = {{host}}/api/v1/destinos
 
-### 1. Listar todos os destinos
+@admin = admin
+@senhaAdmin = trocar-esta-senha
+
+@viajante = viajante
+@senhaViajante = trocar-esta-senha
+
+### ==========================================================================
+### 1. Consultas — públicas, sem credencial
+### ==========================================================================
+
+### 1.1 Listar todos os destinos
 GET {{base}}
 Accept: application/json
 
-### 2. Pesquisar por nome (parcial, sem diferenciar acentos/maiúsculas)
+### 1.2 Pesquisar por nome (parcial, sem diferenciar acentos/maiúsculas)
 GET {{base}}?nome=gramado
 Accept: application/json
 
-### 3. Pesquisar por localização
+### 1.3 Pesquisar por localização
 GET {{base}}?localizacao=argentina
 Accept: application/json
 
-### 4. Pesquisar combinando os dois filtros
+### 1.4 Pesquisar combinando os dois filtros
 GET {{base}}?nome=bariloche&localizacao=argentina
 Accept: application/json
 
-### 5. Cadastrar um destino
+### ==========================================================================
+### 2. Manutenção do catálogo — exige perfil ADMIN
+### ==========================================================================
+
+### 2.1 Cadastrar um destino
 # @name cadastrar
 POST {{base}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
 Content-Type: application/json
 
 {
@@ -37,12 +59,13 @@ Content-Type: application/json
 ### Guarda o id do destino recém-criado
 @destinoId = {{cadastrar.response.body.id}}
 
-### 6. Detalhar o destino criado
+### 2.2 Detalhar o destino criado (público)
 GET {{base}}/{{destinoId}}
 Accept: application/json
 
-### 7. Atualizar por completo (PUT)
+### 2.3 Atualizar por completo (PUT)
 PUT {{base}}/{{destinoId}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
 Content-Type: application/json
 
 {
@@ -54,16 +77,22 @@ Content-Type: application/json
   "precoPacote": 3450.00
 }
 
-### 8. Atualizar parcialmente (PATCH)
+### 2.4 Atualizar parcialmente (PATCH)
 PATCH {{base}}/{{destinoId}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
 Content-Type: application/json
 
 {
   "hoteisDisponiveis": 80
 }
 
-### 9. Registrar avaliação (recalcula a média)
+### ==========================================================================
+### 3. Avaliações — exige estar autenticado (USER ou ADMIN)
+### ==========================================================================
+
+### 3.1 Registrar avaliação como viajante (recalcula a média)
 POST {{base}}/{{destinoId}}/avaliacoes
+Authorization: Basic {{viajante}} {{senhaViajante}}
 Content-Type: application/json
 
 {
@@ -72,8 +101,9 @@ Content-Type: application/json
   "comentario": "Inesquecível, voltarei em julho."
 }
 
-### 10. Registrar outra avaliação
+### 3.2 Registrar outra avaliação
 POST {{base}}/{{destinoId}}/avaliacoes
+Authorization: Basic {{viajante}} {{senhaViajante}}
 Content-Type: application/json
 
 {
@@ -82,17 +112,66 @@ Content-Type: application/json
   "comentario": "Ótimo passeio, acesso um pouco difícil."
 }
 
-### 11. Listar avaliações do destino
+### 3.3 Listar avaliações do destino (público)
 GET {{base}}/{{destinoId}}/avaliacoes
 Accept: application/json
 
-### 12. Excluir o destino (remove também as avaliações)
-DELETE {{base}}/{{destinoId}}
+### ==========================================================================
+### 4. Cenários de autenticação e autorização
+### ==========================================================================
 
-### --- Cenários de erro ---
-
-### 13. 400 — payload inválido
+### 4.1 401 — escrita sem credencial
 POST {{base}}
+Content-Type: application/json
+
+{
+  "nome": "Sem credencial",
+  "descricao": "Esta requisicao deve ser recusada com 401.",
+  "localizacao": { "cidade": "Blumenau", "estado": "SC", "pais": "Brasil" },
+  "atividades": [],
+  "hoteisDisponiveis": 1,
+  "precoPacote": 100.00
+}
+
+### 4.2 401 — senha incorreta
+POST {{base}}
+Authorization: Basic {{admin}} senha-errada
+Content-Type: application/json
+
+{
+  "nome": "Senha errada",
+  "descricao": "Esta requisicao deve ser recusada com 401.",
+  "localizacao": { "cidade": "Blumenau", "estado": "SC", "pais": "Brasil" },
+  "atividades": [],
+  "hoteisDisponiveis": 1,
+  "precoPacote": 100.00
+}
+
+### 4.3 403 — autenticado como USER, tentando cadastrar (operação de ADMIN)
+POST {{base}}
+Authorization: Basic {{viajante}} {{senhaViajante}}
+Content-Type: application/json
+
+{
+  "nome": "Perfil insuficiente",
+  "descricao": "Esta requisicao deve ser recusada com 403.",
+  "localizacao": { "cidade": "Blumenau", "estado": "SC", "pais": "Brasil" },
+  "atividades": [],
+  "hoteisDisponiveis": 1,
+  "precoPacote": 100.00
+}
+
+### 4.4 403 — autenticado como USER, tentando excluir
+DELETE {{base}}/{{destinoId}}
+Authorization: Basic {{viajante}} {{senhaViajante}}
+
+### ==========================================================================
+### 5. Cenários de erro de requisição
+### ==========================================================================
+
+### 5.1 400 — payload inválido
+POST {{base}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
 Content-Type: application/json
 
 {
@@ -101,8 +180,9 @@ Content-Type: application/json
   "precoPacote": -50
 }
 
-### 14. 400 — nota fora do intervalo permitido (1 a 5)
+### 5.2 400 — nota fora do intervalo permitido (1 a 5)
 POST {{base}}/{{destinoId}}/avaliacoes
+Authorization: Basic {{viajante}} {{senhaViajante}}
 Content-Type: application/json
 
 {
@@ -110,10 +190,32 @@ Content-Type: application/json
   "nota": 9
 }
 
-### 15. 404 — destino inexistente
+### 5.3 409 — destino duplicado (mesmo nome, cidade e país)
+POST {{base}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
+Content-Type: application/json
+
+{
+  "nome": "Jericoacoara",
+  "descricao": "Duplicata do destino ja cadastrado acima.",
+  "localizacao": { "cidade": "Jijoca de Jericoacoara", "estado": "CE", "pais": "Brasil" },
+  "atividades": [],
+  "hoteisDisponiveis": 10,
+  "precoPacote": 1000.00
+}
+
+### 5.4 404 — destino inexistente
 GET {{base}}/00000000-0000-0000-0000-000000000000
 Accept: application/json
 
-### 16. 400 — identificador em formato inválido
+### 5.5 400 — identificador em formato inválido
 GET {{base}}/abc
 Accept: application/json
+
+### ==========================================================================
+### 6. Limpeza
+### ==========================================================================
+
+### 6.1 Excluir o destino criado (remove também as avaliações)
+DELETE {{base}}/{{destinoId}}
+Authorization: Basic {{admin}} {{senhaAdmin}}
