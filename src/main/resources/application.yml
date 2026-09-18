@@ -1,0 +1,15 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: destinos-api
+
+# Carga de dados de exemplo em memoria na inicializacao.
+# Defina como false para subir a aplicacao com a base vazia.
+app:
+  dados-iniciais: true
+
+logging:
+  level:
+    br.com.agenciaviagens: INFO
