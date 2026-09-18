@@ -6,9 +6,11 @@ import java.util.Comparator;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -34,6 +36,25 @@ public class TratadorGlobalDeExcecoes {
     public ResponseEntity<ErroResponse> tratarConflito(ConflitoDeDadosException excecao,
                                                        HttpServletRequest requisicao) {
         return construir(HttpStatus.CONFLICT, excecao.getMessage(), requisicao);
+    }
+
+    /**
+     * Rede de seguranca para a unicidade de destino.
+     *
+     * A camada de servico ja checa duplicidade antes de gravar, mas essa
+     * checagem e uma leitura seguida de uma escrita: duas requisicoes
+     * simultaneas podem passar as duas pela verificacao. Quem decide de fato e
+     * a constraint uk_destino_nome_local, no banco. Quando ela dispara, o
+     * cliente recebe o mesmo 409 que receberia pelo caminho normal, em vez de
+     * um 500 com detalhe de SQL vazando no corpo.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErroResponse> tratarViolacaoDeIntegridade(DataIntegrityViolationException excecao,
+                                                                    HttpServletRequest requisicao) {
+        log.warn("Violacao de integridade em {} {}",
+                requisicao.getMethod(), requisicao.getRequestURI(), excecao);
+        return construir(HttpStatus.CONFLICT,
+                "A operacao viola uma regra de unicidade ou integridade dos dados", requisicao);
     }
 
     @ExceptionHandler(RequisicaoInvalidaException.class)
@@ -72,6 +93,23 @@ public class TratadorGlobalDeExcecoes {
                                                                 HttpServletRequest requisicao) {
         return construir(HttpStatus.BAD_REQUEST,
                 "Valor invalido para o parametro '" + excecao.getName() + "'", requisicao);
+    }
+
+    /**
+     * Acesso negado precisa de tratamento explicito aqui.
+     *
+     * A maior parte dos 403 nasce na cadeia de filtros e e respondida pelo
+     * TratadorDeErrosDeSeguranca, sem passar por este advice. Mas se a
+     * autorizacao vier a ser aplicada tambem no nivel de metodo, a excecao
+     * sobe de dentro do controller -- e sem este handler ela cairia no
+     * tratamento generico abaixo e viraria um 500.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErroResponse> tratarAcessoNegado(AccessDeniedException excecao,
+                                                           HttpServletRequest requisicao) {
+        log.warn("Acesso negado em {} {}", requisicao.getMethod(), requisicao.getRequestURI());
+        return construir(HttpStatus.FORBIDDEN,
+                "Seu perfil de acesso nao permite esta operacao", requisicao);
     }
 
     @ExceptionHandler(Exception.class)
