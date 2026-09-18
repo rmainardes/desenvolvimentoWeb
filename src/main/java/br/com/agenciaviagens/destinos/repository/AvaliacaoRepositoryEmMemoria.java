@@ -7,12 +7,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Repository;
 
 /**
- * Implementacao de armazenamento volatil das avaliacoes.
+ * Implementacao volatil da porta de avaliacoes, herdada da primeira versao.
+ *
+ * Assim como DestinoRepositoryEmMemoria, deixou de ser um bean Spring com a
+ * migracao para PostgreSQL e hoje serve apenas como dublê nos testes de
+ * unidade da camada de servico. Ver a documentacao daquela classe.
  */
-@Repository
 public class AvaliacaoRepositoryEmMemoria implements AvaliacaoRepository {
 
     private final Map<UUID, Avaliacao> avaliacoes = new ConcurrentHashMap<>();

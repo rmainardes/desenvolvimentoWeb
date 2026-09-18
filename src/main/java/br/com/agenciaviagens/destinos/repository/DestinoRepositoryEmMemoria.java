@@ -8,13 +8,25 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Repository;
 
 /**
- * Implementacao de armazenamento volatil (ConcurrentHashMap).
- * Os dados sao perdidos ao reiniciar a aplicacao, conforme escopo desta etapa.
+ * Implementacao volatil da porta de destinos, herdada da primeira versao.
+ *
+ * ATENCAO: esta classe deixou de ser um bean Spring. Desde a migracao para
+ * PostgreSQL, a implementacao usada em producao e DestinoRepositoryJpa; a
+ * anotacao @Repository foi removida daqui justamente para que exista um unico
+ * candidato a injecao de DestinoRepository.
+ *
+ * Ela permanece no projeto com dois propositos:
+ *
+ *   1. servir de dublê nos testes de unidade da camada de servico, que rodam
+ *      sem contexto Spring e sem banco -- e continuam passando sem alteracao,
+ *      o que e a melhor evidencia de que a troca de persistencia nao vazou
+ *      para a regra de negocio;
+ *   2. deixar visivel a diferenca entre os dois mundos: aqui os dados vivem em
+ *      um mapa e somem no restart, sem transacao, sem constraint e sem
+ *      concorrencia real entre processos.
  */
-@Repository
 public class DestinoRepositoryEmMemoria implements DestinoRepository {
 
     private final Map<UUID, Destino> destinos = new ConcurrentHashMap<>();
@@ -28,6 +40,16 @@ public class DestinoRepositoryEmMemoria implements DestinoRepository {
     @Override
     public Optional<Destino> buscarPorId(UUID id) {
         return id == null ? Optional.empty() : Optional.ofNullable(destinos.get(id));
+    }
+
+    /**
+     * Sem banco nao ha lock de linha: a busca para atualizacao e a busca
+     * comum. A diferenca de garantia entre as duas implementacoes e real e
+     * esta documentada no README.
+     */
+    @Override
+    public Optional<Destino> buscarParaAtualizacao(UUID id) {
+        return buscarPorId(id);
     }
 
     @Override
@@ -52,5 +74,10 @@ public class DestinoRepositoryEmMemoria implements DestinoRepository {
     @Override
     public boolean remover(UUID id) {
         return id != null && destinos.remove(id) != null;
+    }
+
+    @Override
+    public boolean vazio() {
+        return destinos.isEmpty();
     }
 }
